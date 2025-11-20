@@ -1,53 +1,46 @@
 #define ENTT_ID_TYPE std::uint64_t
 
 #include <entt/entt.hpp>
-#include <zmq.hpp>
 #include <iostream>
-#include <csignal>
 
 typedef uint64_t network_id_t;
 
-entt::registry registry;
-
 template<typename T>
-class change_observer {
+class change_storage_t {
     using storage_t = typename entt::storage_for<T>::type;
     using reactive_storage = entt::basic_reactive_mixin<entt::basic_storage<entt::reactive>, entt::basic_registry<> >;
 
 public:
-    change_observer(entt::registry &registry, storage_t &storage, const entt::id_type id)
-        : registry(registry), storage(storage) {
-        printf("Observer uses storage id: %lu\n", id);
-        this->change_storage.on_construct<T>(id).template on_update<T>(id).template on_destroy<T>(id);
-    }
-
-    explicit change_observer(entt::registry &registry, const entt::id_type id = entt::type_hash<T>::value())
-        : change_observer(registry, registry.storage<T>(id), id) {
+    explicit change_storage_t(entt::registry &registry, const bool on_destroy = false,
+                              const entt::id_type id = entt::type_hash<T>::value()) : on_destroy(on_destroy) {
+        this->change_storage.bind(registry);
+        if (on_destroy) {
+            this->change_storage.template on_destroy<T>(id);
+        } else {
+            this->change_storage.template on_construct<T>(id).template on_update<T>(id);
+        }
     }
 
     reactive_storage change_storage;
-
-private:
-    const entt::registry &registry;
-    const storage_t &storage;
+    bool on_destroy;
 };
 
 template<typename T>
-class storage_archive {
+class storage_archive_t {
+public:
+    std::vector<char> buffer;
+
+    storage_archive_t(const entt::storage<network_id_t> &network_ids,
+                      std::function<void(storage_archive_t &, const T &)> serialize) : network_ids(network_ids),
+        serialize(std::move(std::move(serialize))) {
+    }
+
     void write(const void *data, const size_t size) {
         buffer.insert(buffer.end(), static_cast<const char *>(data), static_cast<const char *>(data) + size);
     }
 
-public:
-    std::vector<char> buffer;
-
-    storage_archive(const entt::storage<network_id_t> &network_ids,
-                    std::function<void(storage_archive &, T &)> serialize) : network_ids(network_ids),
-                                                                             serialize(serialize) {
-    }
-
     void operator()(const entt::entity entity) {
-        this->write(static_cast<const void *>(&network_ids.get(entity)), sizeof(network_id_t));
+        this->write(static_cast<const void *>(&this->network_ids.get(entity)), sizeof(network_id_t));
     }
 
     void operator()(const T &data) {
@@ -59,61 +52,61 @@ public:
 
 private:
     const entt::storage<network_id_t> &network_ids;
-    std::function<void(storage_archive &, T &)> serialize;
+    std::function<void(storage_archive_t &, const T &)> serialize;
 };
 
-struct plugin_component {
+struct plugin_component_t {
     char data;
 };
 
-char buffer[10000000];
-
 int main() {
-    zmq::context_t ctx;
-    zmq::socket_t socket(ctx, zmq::socket_type::pub);
-    socket.bind("tcp://*:5555");
+    entt::registry registry;
 
     entt::storage<network_id_t> network_ids;
 
-    std::string storage_type = "test";
-    storage_type += "_component";
-    const entt::hashed_string storage_name(storage_type.c_str(), storage_type.size());
-    printf("Plugin Component has storage id: %lu\n", static_cast<entt::id_type>(storage_name));
-    auto &storage = registry.storage<plugin_component>(storage_name);
-    const change_observer<plugin_component> observer(registry, storage_name);
+    using namespace entt::literals;
+    auto &entity_storage = registry.storage<entt::reactive>("entity_observer"_hs);
+    entity_storage.on_construct<entt::entity>();
+    auto &entity_destroy_storage = registry.storage<entt::reactive>("entity_destroy_observer"_hs);
+    entity_destroy_storage.on_destroy<entt::entity>();
 
-    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-    for (int i = 0; i < sizeof(buffer); ++i) {
-        const entt::entity entity = registry.create();
-        storage.emplace(entity, plugin_component{&buffer[i]});
-        network_ids.emplace(entity, i);
-    }
-    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-    std::cout << "Creating entities: " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() <<
-            "[µs]" << std::endl;
+    const change_storage_t<plugin_component_t> component_storage(registry);
+    const change_storage_t<plugin_component_t> destroy_component_storage(registry, true);
 
-    begin = std::chrono::steady_clock::now();
-    buffer_sink sink;
-    int i = 0;
-    for (const auto entity: observer.change_storage) {
-        sink.write(&registry.get<network_id>(entity), 8);
-        test_serialize(buffer_sink::DataWriter, &sink, &storage.get(entity).data);
-        i++;
-    }
-    end = std::chrono::steady_clock::now();
-    std::cout << "Serialization took: " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() <<
-            "[µs]" << std::endl;
-    printf("Sending %zu bytes from %d entities\n", sink.buffer.size(), i);
+    // #############################################
+    const entt::entity entity = registry.create();
+    registry.emplace<plugin_component_t>(entity, 0);
+    network_ids.emplace(entity, 0);
+    const entt::entity entity2 = registry.create();
+    registry.destroy(entity2);
+    // #############################################
 
-    begin = std::chrono::steady_clock::now();
-    const zmq::const_buffer data(sink.buffer.data(), sink.buffer.size());
-    socket.send(data, zmq::send_flags::dontwait);
-    end = std::chrono::steady_clock::now();
-    std::cout << "Sending took: " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() <<
-            "[µs]" << std::endl;
+    storage_archive_t<plugin_component_t> archive{
+        network_ids,
+        [](storage_archive_t<plugin_component_t> &arch, const plugin_component_t &comp) {
+            arch.write(&comp.data, sizeof(comp.data));
+        }
+    };
+    storage_archive_t<plugin_component_t> destroy_archive{
+        network_ids,
+        [](storage_archive_t<plugin_component_t> &arch, const plugin_component_t &comp) {
+            arch.write(&comp.data, sizeof(comp.data));
+        }
+    };
+    storage_archive_t<plugin_component_t> entity_archive{network_ids, nullptr};
+    storage_archive_t<plugin_component_t> entity_destroy_archive{network_ids, nullptr};
 
-    socket.close();
-    ctx.close();
+    entt::snapshot{registry}.get<plugin_component_t>(archive, component_storage.change_storage.begin(),
+                                                     component_storage.change_storage.end());
+    destroy_archive.write(destroy_component_storage.change_storage.data(),
+                          destroy_component_storage.change_storage.size());
+    entity_archive.write(entity_storage.data(), entity_storage.size() * sizeof(entt::entity));
+    entity_destroy_archive.write(entity_destroy_storage.data(), entity_destroy_storage.size() * sizeof(entt::entity));
+
+    printf("Sending %zu bytes for new components\n", archive.buffer.size());
+    printf("Sending %zu bytes for removed components\n", destroy_archive.buffer.size());
+    printf("Sending %zu bytes for new entities\n", entity_archive.buffer.size());
+    printf("Sending %zu bytes for removed entities\n", entity_destroy_archive.buffer.size());
 
     return 0;
 }
