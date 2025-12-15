@@ -3,7 +3,7 @@ include(FetchContent)
 cmake_minimum_required(VERSION 4.0)
 project(ecs_net CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 set(SKIP_PERFORMANCE_COMPARISON ON)
 FetchContent_Declare(
