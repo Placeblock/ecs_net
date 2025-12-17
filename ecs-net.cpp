@@ -98,7 +98,7 @@ int main() {
     auto &static_entities = registry.ctx().emplace<static_entities_t>();
     ecs_history::record_changes<plugin_component_t>(registry);
 
-    for (int i = 0; i < 1; ++i) {
+    for (int i = 0; i < 1000000; ++i) {
         const entt::entity entt = registry.create();
         static_entities.create(entt);
         registry.emplace<plugin_component_t>(entt, 0);
