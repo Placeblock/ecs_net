@@ -25,7 +25,11 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(EnTT cppzmq cereal)
 
+add_subdirectory(lib/ecs_history)
 
-add_executable(ecs_net ecs-net.cpp)
-target_link_libraries(ecs_net EnTT::EnTT cppzmq cereal)
+add_executable(ecs_net ecs-net.cpp
+        include/change_serialization.hpp
+        include/component_serializer.hpp
+        include/component_traits.hpp)
+target_link_libraries(ecs_net EnTT::EnTT cppzmq cereal ecs-history)
 target_include_directories(ecs_net PUBLIC include)

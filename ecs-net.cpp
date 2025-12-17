@@ -5,42 +5,34 @@
 
 #include <cereal/cereal.hpp>
 #include <cereal/archives/portable_binary.hpp>
+#include "cereal/types/string.hpp"
 
 using namespace entt::literals;
 
 enum class traits_t : uint16_t {
-    TRANSIENT = 0x01,
-    HISTORY = 0x02,
-    SYNCHRONIZED = 0x04,
-    SAVED = 0x08,
+    NO = 0x00,
+    TRIVIAL = 0x01,
 
     _entt_enum_as_bitmask
 };
 
 struct plugin_component_t {
-    void *data;
+    std::string name;
 };
 
-template<typename Archive>
-void serializeComponent(Archive &archive, const entt::entity entt,
-                        const entt::meta_any &value) {
-    const entt::meta_type type = value.type();
+struct entity_version_t {
+    uint32_t version;
+};
 
-    const auto traits = type.traits<traits_t>();
-    if (!!(traits & traits_t::TRANSIENT)) {
-        archive(entt);
-        const void *data = value.base().data();
-        auto binary = cereal::binary_data(data, type.size_of());
-        archive(binary);
-        return;
-    }
 
-    throw std::runtime_error("Cannot serialize component");
+template<typename Archive, typename Type>
+void serialize_simple(Archive &archive, const Type &value) {
+    archive(value);
 }
 
-template<typename Archive>
-void serializeRegistry(Archive &archive, entt::registry &reg, traits_t traits = traits_t::HISTORY) {
-    const size_t numSets = std::ranges::count_if(reg.storage(), [traits](const auto &p) {
+template<typename Archive, traits_t traits = traits_t::NO>
+void serialize_registry(Archive &archive, entt::registry &reg) {
+    const uint16_t numSets = std::ranges::count_if(reg.storage(), [](const auto &p) {
         const entt::meta_type type = entt::resolve(p.first);
         const auto type_traits = type.traits<traits_t>();
         return !!(type_traits & traits);
@@ -49,33 +41,63 @@ void serializeRegistry(Archive &archive, entt::registry &reg, traits_t traits = 
 
     for (auto [id, set]: reg.storage()) {
         const auto meta = entt::resolve(id);
-        if (!meta || !(meta.traits<traits_t>() & traits)) {
+        if (!meta) {
             continue;
+        }
+        if constexpr (traits != traits_t::NO) {
+            if (!(meta.traits<traits_t>() & traits)) {
+                continue;
+            }
         }
         archive(static_cast<uint64_t>(id));
         archive(static_cast<uint32_t>(set.size()));
         for (const auto &entt: set) {
+            archive(entt);
+            archive(reg.get<entity_version_t>(entt).version);
             void *value = set.value(entt);
             const entt::meta_any any = meta.from_void(value);
-            serializeComponent(archive, entt, any);
+            serialize_component(archive, any);
         }
     }
 }
 
+template<typename Archive>
+void serialize_changes(Archive &archive, entt::registry &reg) {
+    reg.ctx().
+
+
+
+}
+
+
+#define SERIALIZE_SIMPLE(T) \
+    entt::meta_factory<T>() \
+    .func<serialize_simple<cereal::PortableBinaryOutputArchive, T>>("serialize"_hs)
+
+
 int main() {
+    SERIALIZE_SIMPLE(uint64_t);
+    SERIALIZE_SIMPLE(uint32_t);
+    SERIALIZE_SIMPLE(uint16_t);
+    SERIALIZE_SIMPLE(uint8_t);
+    SERIALIZE_SIMPLE(int64_t);
+    SERIALIZE_SIMPLE(int32_t);
+    SERIALIZE_SIMPLE(int16_t);
+    SERIALIZE_SIMPLE(int8_t);
+    SERIALIZE_SIMPLE(char);
+    SERIALIZE_SIMPLE(std::string);
+
     entt::registry registry;
 
     entt::meta_factory<plugin_component_t>{}
-            .traits(traits_t::TRANSIENT)
-            .data<&plugin_component_t::data>("data"_hs);
+            .data<&plugin_component_t::name>("name"_hs);
 
-    int test = 0;
     const entt::entity entt = registry.create();
-    registry.emplace<plugin_component_t>(entt, &test);
+    registry.emplace<plugin_component_t>(entt, "t");
 
-    std::ofstream wf("student.dat", std::ios::out | std::ios::binary);
+    std::ofstream wf("data.buildit", std::ios::out | std::ios::binary);
     cereal::PortableBinaryOutputArchive archive(wf);
-    serializeRegistry(archive, registry);
+    serialize_registry(archive, registry);
     wf.close();
 
     return 0;
