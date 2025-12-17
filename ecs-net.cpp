@@ -7,6 +7,13 @@
 #include <cereal/archives/portable_binary.hpp>
 #include "cereal/types/string.hpp"
 
+#include <monitor.hpp>
+#include <change_mixin.hpp>
+#include <chrono>
+
+#include "change_serialization.hpp"
+#include "registry.hpp"
+
 using namespace entt::literals;
 
 enum class traits_t : uint16_t {
@@ -17,7 +24,7 @@ enum class traits_t : uint16_t {
 };
 
 struct plugin_component_t {
-    std::string name;
+    char data;
 };
 
 struct entity_version_t {
@@ -25,19 +32,21 @@ struct entity_version_t {
 };
 
 
-template<typename Archive, typename Type>
-void serialize_simple(Archive &archive, const Type &value) {
-    archive(value);
-}
-
 template<typename Archive, traits_t traits = traits_t::NO>
 void serialize_registry(Archive &archive, entt::registry &reg) {
-    const uint16_t numSets = std::ranges::count_if(reg.storage(), [](const auto &p) {
-        const entt::meta_type type = entt::resolve(p.first);
-        const auto type_traits = type.traits<traits_t>();
-        return !!(type_traits & traits);
-    });
-    archive(numSets);
+    const auto &static_entities = reg.ctx().get<static_entities_t>();
+
+    if constexpr (traits != traits_t::NO) {
+        const uint16_t numSets = std::ranges::count_if(reg.storage(), [](const auto &p) {
+            const entt::meta_type type = entt::resolve(p.first);
+            const auto type_traits = type.traits<traits_t>();
+            return !!(type_traits & traits);
+        });
+        archive(numSets);
+    } else {
+        uint16_t storages = std::distance(reg.storage().begin(), reg.storage().end());
+        archive(storages);
+    }
 
     for (auto [id, set]: reg.storage()) {
         const auto meta = entt::resolve(id);
@@ -52,48 +61,48 @@ void serialize_registry(Archive &archive, entt::registry &reg) {
         archive(static_cast<uint64_t>(id));
         archive(static_cast<uint32_t>(set.size()));
         for (const auto &entt: set) {
-            archive(entt);
-            archive(reg.get<entity_version_t>(entt).version);
+            static_entity_t static_entity = static_entities.get_static_entity(entt);
+            archive(static_entity);
+            archive(static_entities.get_version(static_entity));
             void *value = set.value(entt);
             const entt::meta_any any = meta.from_void(value);
-            serialize_component(archive, any);
+            ecsnet::serialization::serialize_component(archive, any);
         }
     }
 }
 
 template<typename Archive>
 void serialize_changes(Archive &archive, entt::registry &reg) {
-    reg.ctx().
-
-
-
+    ecsnet::serialization::change_serializer<Archive> serializer{archive};
+    const auto &monitors = reg.ctx().get<std::vector<std::shared_ptr<base_component_monitor_t> > >();
+    for (auto &monitor: monitors) {
+        auto commit = monitor->commit();
+        commit->supply(serializer);
+    }
 }
 
-
-#define SERIALIZE_SIMPLE(T) \
-    entt::meta_factory<T>() \
-    .func<serialize_simple<cereal::PortableBinaryOutputArchive, T>>("serialize"_hs)
-
+template<>
+struct entt::storage_type<plugin_component_t> {
+    /*! @brief Type-to-storage conversion result. */
+    using type = change_storage_t<plugin_component_t>;
+};
 
 int main() {
-    SERIALIZE_SIMPLE(uint64_t);
-    SERIALIZE_SIMPLE(uint32_t);
-    SERIALIZE_SIMPLE(uint16_t);
-    SERIALIZE_SIMPLE(uint8_t);
-    SERIALIZE_SIMPLE(int64_t);
-    SERIALIZE_SIMPLE(int32_t);
-    SERIALIZE_SIMPLE(int16_t);
-    SERIALIZE_SIMPLE(int8_t);
-    SERIALIZE_SIMPLE(char);
-    SERIALIZE_SIMPLE(std::string);
-
-    entt::registry registry;
+    ecsnet::serialization::initialize_component_meta_types();
 
     entt::meta_factory<plugin_component_t>{}
-            .data<&plugin_component_t::name>("name"_hs);
+            .traits<traits_t>(traits_t::TRIVIAL)
+            .data<&plugin_component_t::data>("data"_hs);
 
-    const entt::entity entt = registry.create();
-    registry.emplace<plugin_component_t>(entt, "t");
+    entt::registry registry;
+    auto &static_entities = registry.ctx().emplace<static_entities_t>();
+    ecs_history::record_changes<plugin_component_t>(registry);
+
+    for (int i = 0; i < 1; ++i) {
+        const entt::entity entt = registry.create();
+        static_entities.create(entt);
+        registry.emplace<plugin_component_t>(entt, 0);
+    }
 
     std::ofstream wf("data.buildit", std::ios::out | std::ios::binary);
     cereal::PortableBinaryOutputArchive archive(wf);

@@ -10,37 +10,50 @@
 #include "component_serializer.hpp"
 
 namespace ecsnet::serialization {
-    template<typename Archive, typename Type, bool OnlyNew = true>
-    class change_serializer final : public component_change_supplier_t<Type> {
+    enum class change_type_t : uint8_t {
+        CONSTRUCT = 0,
+        UPDATE = 1,
+        UPDATE_ONLY_NEW = 2,
+        DESTRUCT = 3,
+        DESTRUCT_ONLY_NEW = 4,
+
+        _entt_enum_as_bitmask
+    };
+
+    template<typename Archive, bool OnlyNew = true>
+    class change_serializer final : public any_component_change_supplier_t {
     public:
         explicit change_serializer(Archive &archive)
-            : archive(archive), type(entt::resolve<Type>()) {
+            : archive(archive) {
         }
 
-        void apply(const construct_change_t<Type> &c) override {
-            const entt::meta_any value{c.value};
-            serialize_component(archive, value);
+        void apply_construct(entt::meta_any &value) override {
+            archive(change_type_t::CONSTRUCT);
+            serialize_component(this->archive, value);
         }
 
-        void apply(const update_change_t<Type> &c) override {
+        void apply_update(entt::meta_any &old_value, entt::meta_any &new_value) override {
             if constexpr (!OnlyNew) {
-                const entt::meta_any old_value{c.value};
-                serialize_component(archive, old_value);
+                archive(change_type_t::UPDATE);
+                serialize_component(this->archive, old_value);
+                serialize_component(this->archive, new_value);
+            } else {
+                archive(change_type_t::UPDATE_ONLY_NEW);
+                serialize_component(this->archive, new_value);
             }
-            const entt::meta_any new_value{c.value};
-            serialize_component(archive, new_value);
         }
 
-        void apply(const destruct_change_t<Type> &c) override {
+        void apply_destruct(entt::meta_any &old_value) override {
             if constexpr (!OnlyNew) {
-                const entt::meta_any old_value{c.value};
-                serialize_component(archive, old_value);
+                archive(change_type_t::DESTRUCT);
+                serialize_component(this->archive, old_value);
+            } else {
+                archive(change_type_t::DESTRUCT_ONLY_NEW);
             }
         }
 
     private:
         Archive &archive;
-        entt::meta_type type;
     };
 }
 
