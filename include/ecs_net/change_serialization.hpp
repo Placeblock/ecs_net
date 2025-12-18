@@ -6,10 +6,10 @@
 #ifndef ECS_NET_CHANGE_SERIALIZATION_HPP
 #define ECS_NET_CHANGE_SERIALIZATION_HPP
 
-#include <change_applier.hpp>
-#include "component_serializer.hpp"
+#include <ecs_history/change_applier.hpp>
+#include "component_serialization.hpp"
 
-namespace ecsnet::serialization {
+namespace ecs_net::serialization {
     enum class change_type_t : uint8_t {
         CONSTRUCT = 0,
         UPDATE = 1,
@@ -21,7 +21,7 @@ namespace ecsnet::serialization {
     };
 
     template<typename Archive, bool OnlyNew = true>
-    class change_serializer final : public any_component_change_supplier_t {
+    class change_serializer final : public ecs_history::any_component_change_supplier_t {
     public:
         explicit change_serializer(Archive &archive)
             : archive(archive) {

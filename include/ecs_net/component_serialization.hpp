@@ -7,11 +7,17 @@
 
 #include <entt/entt.hpp>
 #include <cereal/cereal.hpp>
-#include "component_traits.hpp"
 
 using namespace entt::literals;
 
-namespace ecsnet::serialization {
+namespace ecs_net::serialization {
+    enum class traits_t : uint16_t {
+        NO = 0x00,
+        TRIVIAL = 0x01,
+
+        _entt_enum_as_bitmask
+    };
+
     template<typename Archive>
     void serialize_component(Archive &archive, const entt::meta_any &value) {
         const entt::meta_type type = value.type();
