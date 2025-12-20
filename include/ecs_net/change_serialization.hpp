@@ -30,18 +30,18 @@ namespace ecs_net::serialization {
         void apply_construct(ecs_history::static_entity_t static_entity, entt::meta_any &value) override {
             archive(static_entity);
             archive(change_type_t::CONSTRUCT);
-            serialize_component(this->archive, value);
+            serialize_component<Archive, true>(this->archive, value);
         }
 
         void apply_update(ecs_history::static_entity_t static_entity, entt::meta_any &old_value, entt::meta_any &new_value) override {
             archive(static_entity);
             if constexpr (!OnlyNew) {
                 archive(change_type_t::UPDATE);
-                serialize_component(this->archive, old_value);
-                serialize_component(this->archive, new_value);
+                serialize_component<Archive, true>(this->archive, old_value);
+                serialize_component<Archive, true>(this->archive, new_value);
             } else {
                 archive(change_type_t::UPDATE_ONLY_NEW);
-                serialize_component(this->archive, new_value);
+                serialize_component<Archive, true>(this->archive, new_value);
             }
         }
 
@@ -49,7 +49,7 @@ namespace ecs_net::serialization {
             archive(static_entity);
             if constexpr (!OnlyNew) {
                 archive(change_type_t::DESTRUCT);
-                serialize_component(this->archive, old_value);
+                serialize_component<Archive, true>(this->archive, old_value);
             } else {
                 archive(change_type_t::DESTRUCT_ONLY_NEW);
             }

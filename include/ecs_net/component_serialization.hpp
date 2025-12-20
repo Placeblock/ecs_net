@@ -18,25 +18,39 @@ namespace ecs_net::serialization {
         _entt_enum_as_bitmask
     };
 
-    template<typename Archive>
+    /**
+     *
+     * @tparam Archive The type of Archive to write to / read from
+     * @tparam Serialize Whether to serialize or deserialize
+     * @param archive The archive
+     * @param value The value
+     */
+    template<typename Archive, bool Serialize>
     void serialize_component(Archive &archive, const entt::meta_any &value) {
         const entt::meta_type type = value.type();
-        if (auto func = type.func("serialize"_hs); func) {
+
+        constexpr auto funcId = Serialize ? "serialize"_hs : "deserialize"_hs;
+        if (auto func = type.func(funcId); func) {
             func.invoke(value, entt::forward_as_meta(archive), value.as_ref());
             return;
         }
+
         if (!!(type.traits<traits_t>() & traits_t::TRIVIAL)) {
             const void *data = value.base().data();
             auto binary = cereal::binary_data(data, type.size_of());
             archive(binary);
             return;
         }
+
         if (type.is_sequence_container()) {
             auto sequence = value.as_sequence_container();
-            std::size_t size = sequence.size();
+            uint32_t size = sequence.size();
             archive(size);
+            if constexpr (!Serialize) {
+                sequence.resize(size);
+            }
             if (sequence.size() > 0
-                && !!(sequence.value_type().traits<traits_t>() & traits_t::TRIVIAL)) {
+                    && !!(sequence.value_type().traits<traits_t>() & traits_t::TRIVIAL)) {
                 const void *data = sequence.begin().base().data();
                 auto binary = cereal::binary_data(data, sequence.value_type().size_of() * size);
                 archive(binary);
@@ -49,11 +63,24 @@ namespace ecs_net::serialization {
         }
         if (type.is_associative_container()) {
             auto assoc = value.as_associative_container();
-            std::size_t size = assoc.size();
+            uint32_t size = assoc.size();
             archive(size);
-            for (const auto &[key, val]: assoc) {
-                serialize_component(archive, key);
-                serialize_component(archive, val);
+
+            if constexpr (Serialize) {
+                for (const auto &[key, val]: assoc) {
+                    serialize_component(archive, key);
+                    serialize_component(archive, val);
+                }
+            } else {
+                for (uint32_t i = 0; i < size; ++i) {
+                    auto key = assoc.key_type().construct();
+                    auto val = assoc.mapped_type().construct();
+                    serialize_component(archive, key.as_ref());
+                    serialize_component(archive, val.as_ref());
+                    if (!assoc.insert(key, val)) {
+                        throw std::runtime_error("Could not insert pair into associative container while deserializing.");
+                    }
+                }
             }
             return;
         }
@@ -71,7 +98,6 @@ namespace ecs_net::serialization {
             }
         }
     }
-
 
     template<typename Archive, typename Type>
     void serialize_simple(Archive &archive, const Type &value) {

@@ -30,7 +30,7 @@ namespace ecs_net::serialization {
             archive(static_entity);
             const void *value = storage.value(entt);
             const entt::meta_any any = meta.from_void(value);
-            serialize_component(archive, any);
+            serialize_component<Archive, true>(archive, any);
         }
     }
 
