@@ -13,18 +13,21 @@
 
 #include <ecs_history/gather_strategy/monitor.hpp>
 
+#include "commit.hpp"
+#include "entity_version.hpp"
+
 
 namespace ecs_net::serialization {
 
     template<typename Archive>
-    void serialize_storage(Archive &archive, const entt::basic_sparse_set<>& storage, const ecs_history::static_entities_t &static_entities) {
+    void serialize_storage(Archive &archive, const entt::basic_sparse_set<>& storage,
+            const ecs_history::static_entities_t &static_entities) {
         const auto meta = entt::resolve(storage.type().hash());
         archive(static_cast<uint64_t>(storage.type().hash()));
         archive(static_cast<uint32_t>(storage.size()));
         for (const auto &entt: storage) {
             ecs_history::static_entity_t static_entity = static_entities.get_static_entity(entt);
             archive(static_entity);
-            archive(static_entities.get_version(static_entity));
             const void *value = storage.value(entt);
             const entt::meta_any any = meta.from_void(value);
             serialize_component(archive, any);
@@ -34,6 +37,7 @@ namespace ecs_net::serialization {
     template<typename Archive, traits_t traits = traits_t::NO>
     void serialize_registry(Archive &archive, entt::registry &reg) {
         const auto &static_entities = reg.ctx().get<ecs_history::static_entities_t>();
+        const auto &version_handler = reg.ctx().get<entity_version_handler_t>();
 
         if constexpr (traits != traits_t::NO) {
             const uint16_t numSets = std::ranges::count_if(reg.storage(), [](const auto &p) {
@@ -57,17 +61,27 @@ namespace ecs_net::serialization {
                     continue;
                 }
             }
-            serialize_storage(archive, storage, static_entities);
+            serialize_storage(archive, storage, static_entities, version_handler);
+        }
+
+        const uint32_t entities = reg.storage<entt::entity>().size();
+        archive(entities);
+        for (const auto& entt : reg.storage<entt::entity>()) {
+            const ecs_history::static_entity_t static_entity = static_entities.get_static_entity(entt);
+            const entity_version_t version = version_handler.get_version(static_entity);
+            archive(static_entity);
+            archive(version);
         }
     }
 
     template<typename Archive>
-    void serialize_changes(Archive &archive, entt::registry &reg) {
+    void serialize_commit(Archive &archive, commit_t &commit) {
         change_serializer<Archive> serializer{archive};
-        const auto &monitors = reg.ctx().get<std::vector<std::shared_ptr<ecs_history::base_component_monitor_t> > >();
-        for (auto &monitor: monitors) {
-            auto commit = monitor->commit();
-            commit->supply(serializer);
+        uint16_t change_sets = commit.component_change_sets.size();
+        archive(change_sets);
+        for (auto &change_set: commit.component_change_sets) {
+            archive(change_set->id);
+            change_set->supply(serializer);
         }
     }
 }

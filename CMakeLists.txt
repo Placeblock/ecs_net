@@ -28,6 +28,8 @@ add_executable(ecs_net ecs-net.cpp
         include/ecs_net/change_serialization.hpp
         include/ecs_net/component_serialization.hpp
         include/ecs_net/serialization.hpp
+        include/ecs_net/entity_version.hpp
+        src/entity_version.cpp
 )
 target_link_libraries(ecs_net cppzmq cereal ecs-history)
 target_include_directories(ecs_net PUBLIC include)
