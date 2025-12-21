@@ -77,12 +77,74 @@ namespace ecs_net::serialization {
     template<typename Archive>
     void serialize_commit(Archive &archive, commit_t &commit) {
         change_serializer<Archive> serializer{archive};
+        uint32_t entity_version_count = commit.entity_versions.size();
+        archive(entity_version_count);
+        for (const auto& [static_entity, version] : commit.entity_versions) {
+            archive(static_entity);
+            archive(version);
+        }
+        uint32_t created_entity_count = commit.created_entities.size();
+        archive(created_entity_count);
+        for (const ecs_history::static_entity_t& created_entity : commit.created_entities) {
+            archive(created_entity);
+        }
         uint16_t change_sets = commit.component_change_sets.size();
         archive(change_sets);
-        for (auto &change_set: commit.component_change_sets) {
+        for (const auto &change_set: commit.component_change_sets) {
             archive(change_set->id);
+            uint32_t count = change_set->count();
+            archive(count);
             change_set->supply(serializer);
         }
+        uint32_t deleted_entity_count = commit.deleted_entities.size();
+        archive(deleted_entity_count);
+        for (const ecs_history::static_entity_t& deleted_entity : commit.deleted_entities) {
+            archive(deleted_entity);
+        }
+    }
+
+    template<typename Archive>
+    std::unordered_map<ecs_history::static_entity_t, entity_version_t> deserialize_commit_entity_versions(Archive &archive) {
+        std::unordered_map<ecs_history::static_entity_t, entity_version_t> entity_versions;
+        uint32_t entity_version_count;
+        archive(entity_version_count);
+        for (int i = 0; i < entity_version_count; ++i) {
+            ecs_history::static_entity_t static_entity;
+            archive(static_entity);
+            entity_version_t version;
+            archive(version);
+            entity_versions[static_entity] = version;
+        }
+        return entity_versions;
+    }
+
+    template<typename Archive>
+    std::vector<ecs_history::static_entity_t> deserialize_entity_list(Archive &archive) {
+        uint32_t entity_count;
+        archive(entity_count);
+        auto static_entities = std::vector<ecs_history::static_entity_t>(entity_count);
+        for (int i = 0; i < entity_count; ++i) {
+            archive(static_entities[i]);
+        }
+        return static_entities;
+    }
+
+    template<typename Archive>
+    std::vector<std::unique_ptr<deserialized_change>> deserialize_commit_changes(Archive &archive) {
+        std::vector<std::unique_ptr<deserialized_change>> changes;
+        uint16_t change_sets;
+        archive(change_sets);
+        for (uint16_t i = 0; i < change_sets; ++i) {
+            entt::id_type id;
+            archive(id);
+            entt::meta_type type = entt::resolve(id);
+            uint32_t count;
+            archive(count);
+            for (int j = 0; j < count; ++j) {
+                changes.push_back(deserialize_change(archive, type));
+            }
+        }
+        return changes;
     }
 }
 
