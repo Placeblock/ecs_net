@@ -11,11 +11,8 @@
 #include "change_serialization.hpp"
 #include <entt/entt.hpp>
 
-#include <ecs_history/gather_strategy/monitor.hpp>
-
 #include "commit.hpp"
 #include "entity_version.hpp"
-
 
 namespace ecs_net::serialization {
 
@@ -96,9 +93,9 @@ namespace ecs_net::serialization {
             archive(count);
             change_set->supply(serializer);
         }
-        uint32_t deleted_entity_count = commit.deleted_entities.size();
+        uint32_t deleted_entity_count = commit.destroyed_entities.size();
         archive(deleted_entity_count);
-        for (const ecs_history::static_entity_t& deleted_entity : commit.deleted_entities) {
+        for (const ecs_history::static_entity_t& deleted_entity : commit.destroyed_entities) {
             archive(deleted_entity);
         }
     }
@@ -129,22 +126,39 @@ namespace ecs_net::serialization {
         return static_entities;
     }
 
+    template<typename Archive, typename Type>
+    std::unique_ptr<ecs_history::base_component_change_set_t> deserialize_change_set(Archive &archive) {
+        std::unique_ptr<ecs_history::component_change_set_t<Type>> change_set;
+        uint32_t count;
+        archive(count);
+        for (uint32_t i = 0; i < count; ++i) {
+            deserialize_change<Archive, Type>(archive);
+        }
+        return std::move(change_set);
+    }
+
     template<typename Archive>
-    std::vector<std::unique_ptr<deserialized_change>> deserialize_commit_changes(Archive &archive) {
-        std::vector<std::unique_ptr<deserialized_change>> changes;
-        uint16_t change_sets;
-        archive(change_sets);
-        for (uint16_t i = 0; i < change_sets; ++i) {
+    std::vector<std::unique_ptr<ecs_history::base_component_change_set_t>> deserialize_commit_changes(Archive &archive) {
+        std::vector<std::unique_ptr<ecs_history::base_component_change_set_t>> change_sets;
+        uint16_t change_set_count;
+        archive(change_set_count);
+        for (uint16_t i = 0; i < change_set_count; ++i) {
             entt::id_type id;
             archive(id);
             entt::meta_type type = entt::resolve(id);
-            uint32_t count;
-            archive(count);
-            for (int j = 0; j < count; ++j) {
-                changes.push_back(deserialize_change(archive, type));
+            auto deserialize_changes_func = type.func("deserialize_change_set"_hs);
+            if (!deserialize_changes_func) {
+                const auto type_name = std::string{type.info().name()};
+                throw std::runtime_error("could not find deserialize change set function for type " + type_name);
             }
+            auto change_set = deserialize_changes_func.invoke({}, entt::forward_as_meta(archive));
+            if (!change_set) {
+                throw std::runtime_error("failed to deserialize change set");
+            }
+            std::unique_ptr<ecs_history::base_component_change_set_t> changes = change_set.template cast<std::unique_ptr<ecs_history::base_component_change_set_t>>();
+            change_sets.push_back(std::move(changes));
         }
-        return changes;
+        return change_sets;
     }
 }
 
