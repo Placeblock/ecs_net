@@ -21,8 +21,9 @@ namespace ecs_net {
         std::unordered_map<ecs_history::static_entity_t, entity_version_t> versions;
 
     public:
-        [[nodiscard]] entity_version_t get_version(ecs_history::static_entity_t entity) const;
+        [[nodiscard]] entity_version_t get_version(ecs_history::static_entity_t entity);
         entity_version_t increase_version(ecs_history::static_entity_t entity);
+        entity_version_t decrease_version(ecs_history::static_entity_t entity);
         void remove_entity(ecs_history::static_entity_t entity);
         void add_entity(ecs_history::static_entity_t entity, entity_version_t version);
     };

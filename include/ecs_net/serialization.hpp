@@ -19,8 +19,8 @@ namespace ecs_net::serialization {
     template<typename Archive>
     void serialize_storage(Archive &archive, const entt::basic_sparse_set<>& storage,
             const ecs_history::static_entities_t &static_entities) {
-        const auto meta = entt::resolve(storage.type().hash());
-        archive(static_cast<uint64_t>(storage.type().hash()));
+        const auto meta = entt::resolve(storage.info().hash());
+        archive(static_cast<uint64_t>(storage.info().hash()));
         archive(static_cast<uint32_t>(storage.size()));
         for (const auto &entt: storage) {
             ecs_history::static_entity_t static_entity = static_entities.get_static_entity(entt);
@@ -34,7 +34,7 @@ namespace ecs_net::serialization {
     template<typename Archive, traits_t traits = traits_t::NO>
     void serialize_registry(Archive &archive, entt::registry &reg) {
         const auto &static_entities = reg.ctx().get<ecs_history::static_entities_t>();
-        const auto &version_handler = reg.ctx().get<entity_version_handler_t>();
+        auto &version_handler = reg.ctx().get<entity_version_handler_t>();
 
         if constexpr (traits != traits_t::NO) {
             const uint16_t numSets = std::ranges::count_if(reg.storage(), [](const auto &p) {
@@ -85,9 +85,9 @@ namespace ecs_net::serialization {
         for (const ecs_history::static_entity_t& created_entity : commit.created_entities) {
             archive(created_entity);
         }
-        uint16_t change_sets = commit.component_change_sets.size();
+        uint16_t change_sets = commit.change_sets.size();
         archive(change_sets);
-        for (const auto &change_set: commit.component_change_sets) {
+        for (const auto &change_set: commit.change_sets) {
             archive(change_set->id);
             uint32_t count = change_set->count();
             archive(count);
@@ -127,19 +127,20 @@ namespace ecs_net::serialization {
     }
 
     template<typename Archive, typename Type>
-    std::unique_ptr<ecs_history::base_component_change_set_t> deserialize_change_set(Archive &archive) {
-        std::unique_ptr<ecs_history::component_change_set_t<Type>> change_set;
+    std::unique_ptr<ecs_history::base_change_set_t> deserialize_change_set(Archive &archive) {
+        auto change_set = std::make_unique<ecs_history::change_set_t<Type>>();
         uint32_t count;
         archive(count);
         for (uint32_t i = 0; i < count; ++i) {
-            deserialize_change<Archive, Type>(archive);
+            std::unique_ptr<ecs_history::component_change_t<Type>> change = deserialize_change<Archive, Type>(archive);
+            change_set->add_change(std::move(change));
         }
         return std::move(change_set);
     }
 
     template<typename Archive>
-    std::vector<std::unique_ptr<ecs_history::base_component_change_set_t>> deserialize_commit_changes(Archive &archive) {
-        std::vector<std::unique_ptr<ecs_history::base_component_change_set_t>> change_sets;
+    std::vector<std::unique_ptr<ecs_history::base_change_set_t>> deserialize_commit_changes(Archive &archive) {
+        std::vector<std::unique_ptr<ecs_history::base_change_set_t>> change_sets;
         uint16_t change_set_count;
         archive(change_set_count);
         for (uint16_t i = 0; i < change_set_count; ++i) {
@@ -155,10 +156,19 @@ namespace ecs_net::serialization {
             if (!change_set) {
                 throw std::runtime_error("failed to deserialize change set");
             }
-            std::unique_ptr<ecs_history::base_component_change_set_t> changes = change_set.template cast<std::unique_ptr<ecs_history::base_component_change_set_t>>();
+            std::unique_ptr<ecs_history::base_change_set_t>& changes = change_set.template cast<std::unique_ptr<ecs_history::base_change_set_t>&>();
             change_sets.push_back(std::move(changes));
         }
         return change_sets;
+    }
+
+    template<typename Archive>
+    commit_t deserialize_commit(Archive& archive) {
+        return commit_t{
+            serialization::deserialize_commit_entity_versions(archive),
+            serialization::deserialize_entity_list(archive),
+            serialization::deserialize_commit_changes(archive),
+            serialization::deserialize_entity_list(archive)};
     }
 }
 

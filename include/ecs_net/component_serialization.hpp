@@ -72,11 +72,17 @@ namespace ecs_net::serialization {
             return;
         }
 
-        for (auto [id, data]: type.data()) {
+        for (const auto& [id, data]: type.data()) {
             if (!data) {
                 throw std::runtime_error("Component attribute is false");
             }
-            serialize_component<Archive, Serialize>(archive, data.get(value).as_ref());
+            if constexpr (Serialize) {
+                serialize_component<Archive, Serialize>(archive, data.get(value).as_ref());
+            } else {
+                entt::meta_any data_any = data.get(value).as_ref();
+                serialize_component<Archive, Serialize>(archive, data_any.as_ref());
+                value.set(id, data_any);
+            }
         }
     }
 
