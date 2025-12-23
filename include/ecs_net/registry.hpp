@@ -75,6 +75,11 @@ namespace ecs_net {
         }
 
         void apply_commit(const commit_t &commit) const {
+            const auto &monitors = this->handle.ctx().get<std::vector<std::shared_ptr<ecs_history::base_component_monitor_t> > >();
+            for (auto &monitor: monitors) {
+                monitor->disable();
+            }
+
             for (const ecs_history::static_entity_t& created_entity : commit.created_entities) {
                 const entt::entity entt = this->handle.create();
                 this->static_entities.create(entt, created_entity);
@@ -90,14 +95,7 @@ namespace ecs_net {
             for (const auto &static_entity: commit.entity_versions | std::views::keys) {
                 !commit.undo ? this->version_handler.decrease_version(static_entity) : this->version_handler.increase_version(static_entity);
             }
-        }
 
-        void run_without_change_detection(const std::function<void()> &callback) const {
-            const auto &monitors = this->handle.ctx().get<std::vector<std::shared_ptr<ecs_history::base_component_monitor_t> > >();
-            for (auto &monitor: monitors) {
-                monitor->disable();
-            }
-            callback();
             for (auto &monitor: monitors) {
                 monitor->enable();
             }
