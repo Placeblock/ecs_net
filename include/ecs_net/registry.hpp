@@ -36,7 +36,7 @@ public:
             monitor->clear();
         }
 
-        auto &created_entities = this->handle.storage<entt::reactive>("entity_created_storage"_hs);
+        auto &created_entities = this->handle.ctx().get<ecs_history::reactive_entity_storage>("created_entities_storage"_hs);
         commit->created_entities.reserve(created_entities.size());
         for (const auto &created_entity : created_entities) {
             ecs_history::static_entity_t static_entity = static_entities.get_static_entity(
@@ -44,8 +44,7 @@ public:
             commit->created_entities.emplace_back(static_entity);
         }
         created_entities.clear();
-        auto &destroyed_entities = this->handle.storage<entt::reactive>(
-            "entity_destroyed_storage"_hs);
+        auto &destroyed_entities = this->handle.ctx().get<ecs_history::reactive_entity_storage>("destroyed_entities_storage"_hs);;
         commit->destroyed_entities.reserve(created_entities.size());
         for (const auto &destroyed_entity : destroyed_entities) {
             ecs_history::static_entity_t static_entity = static_entities.get_static_entity(
@@ -92,6 +91,14 @@ public:
                 monitor->disable();
             }
         }
+        if (this->handle.ctx().contains<ecs_history::reactive_entity_storage>("created_entities_storage"_hs)) {
+            auto &created_storage = this->handle.ctx().get<ecs_history::reactive_entity_storage>("created_entities_storage"_hs);
+            created_storage.reset();
+        }
+        if (this->handle.ctx().contains<ecs_history::reactive_entity_storage>("destroyed_entities_storage"_hs)) {
+            auto &destroyed_storage = this->handle.ctx().get<ecs_history::reactive_entity_storage>("destroyed_entities_storage"_hs);
+            destroyed_storage.reset();
+        }
 
         for (const ecs_history::static_entity_t &created_entity : commit.created_entities) {
             const entt::entity entt = this->handle.create();
@@ -118,6 +125,14 @@ public:
             for (auto &monitor : monitors) {
                 monitor->enable();
             }
+        }
+        if (this->handle.ctx().contains<ecs_history::reactive_entity_storage>("created_entities_storage"_hs)) {
+            auto &created_storage = this->handle.ctx().get<ecs_history::reactive_entity_storage>("created_entities_storage"_hs);
+            created_storage.on_construct<entt::entity>();
+        }
+        if (this->handle.ctx().contains<ecs_history::reactive_entity_storage>("destroyed_entities_storage"_hs)) {
+            auto &destroyed_storage = this->handle.ctx().get<ecs_history::reactive_entity_storage>("destroyed_entities_storage"_hs);
+            destroyed_storage.on_destroy<entt::entity>();
         }
     }
 };
