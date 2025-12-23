@@ -6,6 +6,7 @@
 #define ECS_NET_COMPONENT_SERIALIZER_HPP
 
 #include <entt/entt.hpp>
+#include "cereal/types/string.hpp"
 
 using namespace entt::literals;
 
