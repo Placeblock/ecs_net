@@ -172,12 +172,16 @@ std::vector<std::unique_ptr<ecs_history::base_change_set_t> > deserialize_commit
 }
 
 template<typename Archive>
-commit_t deserialize_commit(Archive &archive) {
-    return commit_t{
-        serialization::deserialize_commit_entity_versions(archive),
-        serialization::deserialize_entity_list(archive),
-        serialization::deserialize_commit_changes(archive),
-        serialization::deserialize_entity_list(archive)};
+std::unique_ptr<commit_t> deserialize_commit(Archive &archive) {
+    auto entity_versions = serialization::deserialize_commit_entity_versions(archive);
+    auto created_entities = serialization::deserialize_entity_list(archive);
+    auto changes = serialization::deserialize_commit_changes(archive);
+    auto removed_entities = serialization::deserialize_entity_list(archive);
+    return std::make_unique<commit_t>(
+        std::move(entity_versions),
+        std::move(created_entities),
+        std::move(changes),
+        std::move(removed_entities));
 }
 }
 

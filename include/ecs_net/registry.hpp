@@ -68,7 +68,7 @@ public:
             commit_entities.emplace(static_entity);
         }
         for (const ecs_history::static_entity_t &static_entity : commit_entities) {
-            commit->entity_versions[static_entity] = this->version_handler.increase_version(
+            commit->entity_versions[static_entity] = this->version_handler.increment_version(
                 static_entity);
         }
 
@@ -105,10 +105,10 @@ public:
             const auto entt = this->static_entities.remove(removed_entity);
             this->handle.destroy(entt);
         }
-        for (const auto &static_entity : commit.entity_versions | std::views::keys) {
+        for (const auto &[entity, version] : commit.entity_versions) {
             commit.undo
-                ? this->version_handler.decrease_version(static_entity)
-                : this->version_handler.increase_version(static_entity);
+                ? this->version_handler.set_version(entity, version-1)
+                : this->version_handler.set_version(entity, version+1);
         }
 
         if (this->handle.ctx().contains<std::vector<std::shared_ptr<
